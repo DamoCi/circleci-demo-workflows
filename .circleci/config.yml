@@ -1,0 +1,51 @@
+version: 2.1
+
+# Test-data generator for the SquaredUp CircleCI plugin.
+# Produces workflow runs for Insights: one workflow always passes, one fails
+# roughly a third of the time, so success rate and state vary per project.
+
+executors:
+  tiny:
+    docker:
+      - image: cimg/base:current
+    resource_class: small
+
+jobs:
+  build:
+    executor: tiny
+    steps:
+      - run:
+          name: Build
+          command: echo "Building..." && sleep 5
+  test:
+    executor: tiny
+    steps:
+      - run:
+          name: Test
+          command: echo "Testing..." && sleep 10
+  flaky-test:
+    executor: tiny
+    steps:
+      - run:
+          name: Flaky test (fails ~33% of runs)
+          command: |
+            sleep $((RANDOM % 20 + 5))
+            if [ $((RANDOM % 3)) -eq 0 ]; then
+              echo "Simulated failure"
+              exit 1
+            fi
+            echo "Passed"
+
+workflows:
+  stable:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+  flaky:
+    jobs:
+      - build
+      - flaky-test:
+          requires:
+            - build

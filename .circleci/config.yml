@@ -1,8 +1,12 @@
 version: 2.1
 
 # Test-data generator for the SquaredUp CircleCI plugin.
-# Produces workflow runs for Insights: one workflow always passes, one fails
-# roughly a third of the time, so success rate and state vary per project.
+# Every pipeline runs all workflows below, producing a mix of statuses:
+#   stable        -> success
+#   flaky         -> success / failed (~33% failure)
+#   long-running  -> running for ~5 minutes, then success
+#   approval      -> on_hold until approved or cancelled in the CircleCI UI
+#   self-cancel   -> canceled (needs a CIRCLE_TOKEN project env var; otherwise succeeds)
 
 executors:
   tiny:
@@ -16,13 +20,13 @@ jobs:
     steps:
       - run:
           name: Build
-          command: echo "Building..." && sleep 5
+          command: echo "Building..." && sleep $((RANDOM % 10 + 3))
   test:
     executor: tiny
     steps:
       - run:
           name: Test
-          command: echo "Testing..." && sleep 10
+          command: echo "Testing..." && sleep $((RANDOM % 20 + 5))
   flaky-test:
     executor: tiny
     steps:
@@ -35,6 +39,32 @@ jobs:
               exit 1
             fi
             echo "Passed"
+  slow-job:
+    executor: tiny
+    steps:
+      - run:
+          name: Slow job (~5 minutes)
+          no_output_timeout: 15m
+          command: sleep 300
+  deploy:
+    executor: tiny
+    steps:
+      - run:
+          name: Deploy
+          command: echo "Deploying..." && sleep 5
+  cancel-me:
+    executor: tiny
+    steps:
+      - run:
+          name: Cancel this workflow
+          command: |
+            if [ -z "$CIRCLE_TOKEN" ]; then
+              echo "CIRCLE_TOKEN not set; skipping self-cancel"
+              exit 0
+            fi
+            curl -s -X POST -H "Circle-Token: $CIRCLE_TOKEN" \
+              "https://circleci.com/api/v2/workflow/$CIRCLE_WORKFLOW_ID/cancel"
+            sleep 60
 
 workflows:
   stable:
@@ -49,3 +79,19 @@ workflows:
       - flaky-test:
           requires:
             - build
+  long-running:
+    jobs:
+      - slow-job
+  approval:
+    jobs:
+      - build
+      - hold:
+          type: approval
+          requires:
+            - build
+      - deploy:
+          requires:
+            - hold
+  self-cancel:
+    jobs:
+      - cancel-me
